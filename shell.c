@@ -19,59 +19,46 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/wait.h>
 
 #define MAXBUFFSIZE 2048
 #define MAXCOMMSIZE 512
 
-/* 
- * Checks for the PS1 env variable and uses it if it exists as command prompt
- */
 void printPrompt(void);
-
-/* 
- * Allocates memory safely, printing an error if it fails
- */
 void *secureMalloc(size_t sizeToAlloc);
-
+int sizeOfArray(char **array);
 char **parseCommands(char *commandInput);
-
-/*
- * 0: none
- * 1: stdin
- * 2: stdout
- * 3: append
- */
-void execute(char **argv, char* string, int io);
-
+int inputPosition(char **args);
+int outputPosition(char **args);
 char **getParams(char *params);
-
-void runCommands(char **normalizedCommands, int sizeNC);
-
-int sizeOfArray(char **array){
-    int size = 0;
-    while(array[size]!=NULL) size++;
-    return size;
-}
+void execute(char *args);
+void runCommands(char **normalizedCommands);
 
 int main(int argc, char *argv[]){
 
     size_t bufferSize = MAXBUFFSIZE;
     char **normalizedCommands;
     char *cmdInput;
-    int sizeNC;
 
     while (1){
         // print prompt
         printPrompt();
+        cmdInput = secureMalloc(bufferSize * sizeof(char));
 
         // get & parse command
         getline(&cmdInput, &bufferSize, stdin); // get input
 
+        if(!strcmp(cmdInput, "exit\n")){
+            free(cmdInput);
+            exit(0);
+        }
+
         normalizedCommands = parseCommands(cmdInput);
-        sizeNC = sizeOfArray(normalizedCommands);
 
         // execute
-        runCommands(normalizedCommands, sizeNC);
+        runCommands(normalizedCommands);
+
+        free(cmdInput);
 
     }
 
@@ -94,18 +81,28 @@ void *secureMalloc(size_t sizeToAlloc){
     return mem;
 }
 
-char **parseCommands(char *commandInput){
+int sizeOfArray(char **array){
+    int size = 0;
+    while(array[size]!=NULL) size++;
+    return size;
+}
 
-    char *token = strtok(commandInput, " \n");
+char **parseCommands(char *commandInput){
+    char *token;
     char *tmpStr = secureMalloc(100 * sizeof(char));
-    char *tmpHandler = secureMalloc(10 * sizeof(char));
     char **parsedArray = secureMalloc(MAXBUFFSIZE * sizeof(char*));
     int argPos = 0;
 
-    while(token != NULL){
-        tmpHandler = strrchr (token, '\n');
-        if (tmpHandler) *tmpHandler = 0;
+    // replace trailing \n with empty char
+    commandInput[strlen(commandInput)-1] = '\0';
 
+    // Ignore leading spaces
+    while(*commandInput && (*commandInput == ' '))
+        commandInput++;
+
+    token = strtok(commandInput, " \n");
+
+    while(token != NULL){
         if(strcmp(token, "<")==0){
             parsedArray[argPos++] = tmpStr;
             parsedArray[argPos++] = "<";
@@ -119,12 +116,13 @@ char **parseCommands(char *commandInput){
             parsedArray[argPos++] = ">>";
             tmpStr = secureMalloc(100 * sizeof(char*));
         } else {
-            strcat(tmpStr,token);
             strcat(tmpStr," ");
+            strcat(tmpStr,token);
         }
         token = strtok(NULL," ");
     }
-    parsedArray[argPos++] = tmpStr;
+
+    parsedArray[argPos++] = ++tmpStr;
 
     char **normalizedCommands = secureMalloc(argPos * sizeof(char*));
     for(size_t i=0; i<argPos; i++){
@@ -135,98 +133,173 @@ char **parseCommands(char *commandInput){
     return normalizedCommands;
 }
 
+// Returns position of stdin redirect token '<' or 0 otherwise
+int inputPosition(char **args){
+    int pos = 0;
+    while(*args != NULL){
+        if(!strcmp(*args, "<")){
+            // Check syntax: token must have arguments at both sides
+            if((*(args+1) != NULL) && (*(args-1) != NULL))
+                return pos;
+        }
+        pos++;
+        *args++;
+    }
+    return 0;
+}
+
+int outputPosition(char **args){
+    int pos = 0;
+    while(*args != NULL){
+        if((!strcmp(*args,">")) || (!strcmp(*args,">>")) || (!strcmp(*args,">&"))){
+            // Check syntax: token must have arguments at both sides
+            if((*(args+1) != NULL) && (*(args-1) != NULL))
+                return pos;
+        }
+        pos++;
+        *args++;
+    }
+    return 0;
+}
+
 char **getParams(char *params){
-    char **commandTokens = secureMalloc(MAXCOMMSIZE * sizeof(char*));
+    char **commandTokens = secureMalloc(30 * sizeof(char*));
     char *token = strtok(params, " \n");
     int arrayPos = 0;
-    char *tmp = secureMalloc(10 * sizeof(char));
 
     // We tokenize the command and arguments, and we eliminate the line-break at the end of the command.
     while(token != NULL){
-        // Remove the end-line chars:
-        tmp = strrchr (token, '\n');
-        if (tmp) *tmp = 0;
-
         // Add the token to the array string and then gets the next argument
-        printf("part: (%s)\n",token);
         commandTokens[arrayPos++] = token;
         token = strtok(NULL, " ");
     }
     return commandTokens;
 }
 
-void execute(char **argv, char *filename, int io){
-    int pid, status, fd;
-    pid = fork();
-    // At this point I check if my PID is 0 (child) or if it's not 0 (parent)
-    if(pid == 0){ // if I am the child
-        switch(io){
-            case 0:
-                break;
-            case 1: // stdin
-                printf("filename: (%s)\n", filename);
-                fd = open (filename, O_RDONLY);
-                if(fd < 0){
+
+void execute(char *args){
+    char **argv = getParams(args);
+    printf("Running command: (%s)\n",argv[0]);
+    if(execvp(argv[0],argv) < 0){ //execute command
+        perror("Command not found.\n");
+        exit(1);
+    } 
+}
+
+void runCommands(char **args){
+
+    int inPos, outPos, err = 0;
+    int fdIn, fdOut;
+
+    int pid, status;
+
+    if((pid = fork()) == 0) {
+
+        if(sizeOfArray(args)>1){
+            inPos = inputPosition(args);
+            outPos = outputPosition(args);
+
+            // I/O redirection
+            if(inPos && outPos){
+                // stdout must go before stdin
+                if(inPos > outPos){
+                    printf("Please use simple I/O redirection\n");
+                } else {
+                    // we need to redirect error to if the redirection is '>&'
+                    if(!strcmp(args[outPos], ">&"))
+                        err = 1;
+
+                    printf("fdIn: (%s)\n", args[inPos+1]);
+                    fdIn = open (args[inPos+1], O_RDONLY);
+                    if(fdIn < 0){
+                        perror("file descriptor stdin error");
+                        exit(1);
+                    }
+
+                    if(!strcmp(args[outPos], ">>")){
+                        fdOut = open(args[outPos+1], O_WRONLY|O_CREAT|O_APPEND, 0644);
+                        if(fdOut < 0){
+                            perror("file descriptor stdout append error");
+                            exit(1);
+                        }
+                    } else {
+                        fdOut = open (args[outPos+1], O_WRONLY|O_CREAT|O_TRUNC, 0644);
+                        if(fdOut < 0){
+                            perror("file descriptor stdout replace error");
+                            exit(1);
+                        }
+                    }
+
+                    if (dup2(fdIn, STDIN_FILENO) < 0) perror("error dup2ing stdin");
+                    if (dup2(fdOut, STDOUT_FILENO) < 0) perror("error dup2ing stdout");
+                    if(err)
+                        if (dup2(fdOut, STDERR_FILENO) < 0) perror("error dup2ing stderr");
+
+                    args[inPos] = NULL;
+
+
+                    printf("executing...\n");
+
+                    execute(args[0]);
+
+                    if (close(fdIn) < 0) perror("Error closing input file descriptor");
+                    if (close(fdOut) < 0) perror("Error closing output file descriptor");
+                }
+            } else if(inPos > 0){  // Input Redirection
+                printf("filename: (%s)\n", args[inPos+1]);
+                fdIn = open (args[inPos+1], O_RDONLY);
+                if(fdIn < 0){
                     perror("file descriptor stdin error");
                     exit(1);
                 }
-                if (dup2(fd, STDIN_FILENO) < 0) perror(NULL);
-                if (close(fd) < 0) perror(NULL);
-            case 2: // stdout
-                fd = open (filename, O_WRONLY|O_CREAT|O_TRUNC, 0644);
-                if(fd < 0){
-                    perror("file descriptor stdout replace error");
-                    exit(1);
+
+                if (dup2(fdIn, STDIN_FILENO) < 0) perror("error dup2ing stdin");
+
+
+                args[inPos] = NULL;
+
+                printf("executing INput..: (%s)\n", args[0]);
+                execute(args[0]);
+
+                if (close(fdIn) < 0) perror("Error closing input file descriptor");
+
+            } else if(outPos > 0){ // Output Redirection
+                if(!strcmp(args[outPos], ">&"))
+                    err = 1;
+
+                if(!strcmp(args[outPos], ">>")){
+                    fdOut = open(args[outPos+1], O_WRONLY|O_CREAT|O_APPEND, 0644);
+                    if(fdOut < 0){
+                        perror("file descriptor stdout append error");
+                        exit(1);
+                    }
+                } else {
+                    fdOut = open (args[outPos+1], O_WRONLY|O_CREAT|O_TRUNC, 0644);
+                    if(fdOut < 0){
+                        perror("file descriptor stdout replace error");
+                        exit(1);
+                    }
                 }
-                if (dup2(fd, STDOUT_FILENO) < 0) perror(NULL);
-                if (close(fd) < 0) perror(NULL);
-            case 3: // append out
-                fd = open (filename, O_WRONLY|O_CREAT|O_APPEND, 0644);
-                if(fd < 0){
-                    perror("file descriptor stdout append error");
-                    exit(1);
-                }
-                if (dup2(fd, STDOUT_FILENO) < 0) perror(NULL);
-                if (close(fd) < 0) perror(NULL);
-            default:
-                break;
-        }
-        execvp(*argv, argv);
-        exit(1);
-    } else { // If I am the parent, wait until my child is done executing
-        wait(&status);
-        free(argv);
-    }
-}
 
-/*
- * 0: none
- * 1: stdin
- * 2: stdout
- * 3: append
- */
-void runCommands(char **normalizedCommands, int sizeNC){
+                if (dup2(fdOut, STDOUT_FILENO) < 0) perror("error dup2ing stdout");
+                if(err)
+                    if (dup2(fdOut, STDERR_FILENO) < 0) perror("error dup2ing stderr");
 
-    int commandNum = 0;
-    char **tmpArgv;
+                args[outPos] = NULL;
 
-    if(normalizedCommands[commandNum+1]!=NULL){
-        if(normalizedCommands[commandNum+2]!=NULL){
-            tmpArgv = getParams(normalizedCommands[commandNum]);
-            if(strcmp(normalizedCommands[commandNum+1], "<")==0){
-                execute(tmpArgv, normalizedCommands[commandNum+2], 1);
-            } else if(strcmp(normalizedCommands[commandNum+1], ">")==0){
-                execute(tmpArgv, normalizedCommands[commandNum+2], 2);
-            } else if(strcmp(normalizedCommands[commandNum+1], ">>")==0){
-                execute(tmpArgv, normalizedCommands[commandNum+2], 3);
+                printf("executing...\n");
+
+                execute(args[0]);
+
+                if (close(fdOut) < 0) perror("Error closing output file descriptor");
             }
         } else {
-            perror("syntax error");
-            exit(2);
+            printf("HODOR\n");
+            execute(args[0]);
         }
-    } else {
-        tmpArgv = getParams(normalizedCommands[commandNum]);
-        execute(tmpArgv, NULL, 0);
-    }
 
+    } else { // Parent
+        wait(&status);
+        free(args);
+    }
 }
