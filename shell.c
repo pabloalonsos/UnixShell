@@ -67,7 +67,7 @@ int main(int argc, char *argv[]){
 
 void printPrompt(void){
     char* PS1 = getenv("PS1");
-    if (PS1) printf("%s :: ", PS1);
+    if (PS1) printf("%s ",PS1);
     else printf("♞ :: ");
 }
 
@@ -237,16 +237,12 @@ void runCommands(char **args){
 
                     args[inPos] = NULL;
 
-
-                    printf("executing...\n");
-
                     execute(args[0]);
 
                     if (close(fdIn) < 0) perror("Error closing input file descriptor");
                     if (close(fdOut) < 0) perror("Error closing output file descriptor");
                 }
             } else if(inPos > 0){  // Input Redirection
-                printf("filename: (%s)\n", args[inPos+1]);
                 fdIn = open (args[inPos+1], O_RDONLY);
                 if(fdIn < 0){
                     perror("file descriptor stdin error");
@@ -255,10 +251,8 @@ void runCommands(char **args){
 
                 if (dup2(fdIn, STDIN_FILENO) < 0) perror("error dup2ing stdin");
 
-
                 args[inPos] = NULL;
 
-                printf("executing INput..: (%s)\n", args[0]);
                 execute(args[0]);
 
                 if (close(fdIn) < 0) perror("Error closing input file descriptor");
@@ -287,14 +281,11 @@ void runCommands(char **args){
 
                 args[outPos] = NULL;
 
-                printf("executing...\n");
-
                 execute(args[0]);
 
                 if (close(fdOut) < 0) perror("Error closing output file descriptor");
             }
         } else {
-            printf("HODOR\n");
             execute(args[0]);
         }
 
