@@ -24,21 +24,79 @@
 #define MAXBUFFSIZE 2048
 #define MAXCOMMSIZE 512
 
+/*
+ * Prints the PS1 environment variable as prompt or the default.
+ */
 void printPrompt(void);
+
+/*
+ * Allocates memory safely and throws an error if it fails
+ */
 void *secureMalloc(size_t sizeToAlloc, char *errMsg);
+
+/*
+ * It returns the size of an array that has NULL as tail
+ */
 int sizeOfArray(char **array);
+
+/*
+ * This method divides the input string of commands into an array of elements in which the following 
+ * characters have their own char *:
+ *  ">", ">>", ">&", "<"
+ * The rest of the elements of the array are the commands to be run (e.g. ls -la, echo, etc)
+ */
 char **parseCommands(char *commandInput);
+
+/*
+ * It returns the position in the array of commands the position of an input redirection character
+ * If it doesn't find any, it returns 0
+ */
 int inputPosition(char **args);
+
+/*
+ * It returns the position in the array of commands the position of an output redirection character
+ * If it doesn't find any, it returns 0
+ */
 int outputPosition(char **args);
+
+/*
+ * It sets the output redirection of the forms ">", ">>" and ">&"
+ */
+void redirectOutput(char **args, int fdOut, int err, int outPos);
+
+/*
+ * It sets the output redirection of the forms "<"
+ */
+void redirectInput(char **args, int fdIn, int err, int inPos);
+
+/*
+ * It executes the method close() on the file descriptor passed
+ */
+void closeRedirect(int fd);
+
+/*
+ * It tokenizes the elements of the command. This is, if we have a command with options,
+ * it will tokenize the command and then each of the options.
+ */
 char **getParams(char *params);
+
+/*
+ * It safely calls execvp passing the command and arguments
+ */
 void execute(char *args);
-void runCommands(char **normalizedCommands);
+
+/*
+ * It sets the necessary redirection and executes the commands parsed previously
+ */
+void evaluate(char **normalizedCommands);
 
 int main(int argc, char *argv[]){
 
     size_t bufferSize = MAXBUFFSIZE;
     char **normalizedCommands;
     char *cmdInput;
+
+    printf("\nSpeak, friend, and enter [your commands]. Enter 'exit' when you are done.\n\n");
 
     while (1){
         // print prompt
@@ -56,7 +114,7 @@ int main(int argc, char *argv[]){
         normalizedCommands = parseCommands(cmdInput);
 
         // execute
-        runCommands(normalizedCommands);
+        evaluate(normalizedCommands);
 
         free(cmdInput);
 
@@ -115,6 +173,10 @@ char **parseCommands(char *commandInput){
         } else if (strcmp(token, ">>") == 0){
             parsedArray[argPos++] = tmpStr;
             parsedArray[argPos++] = ">>";
+            tmpStr = secureMalloc(100 * sizeof(char*), "Couldn't allocate mem for temporary parsing string.");
+        } else if (strcmp(token, ">&") == 0){
+            parsedArray[argPos++] = tmpStr;
+            parsedArray[argPos++] = ">&";
             tmpStr = secureMalloc(100 * sizeof(char*), "Couldn't allocate mem for temporary parsing string.");
         } else {
             strcat(tmpStr," ");
@@ -186,10 +248,55 @@ void execute(char *args){
     } 
 }
 
-void runCommands(char **args){
+void redirectInput(char **args, int fdIn, int err, int inPos){
+    fdIn = open (args[inPos+1], O_RDONLY);
+    if(fdIn < 0){
+        perror("file descriptor stdin error");
+        exit(1);
+    }
+
+    if (dup2(fdIn, STDIN_FILENO) < 0) perror("error dup2ing stdin");
+
+    args[inPos] = NULL;
+
+    if (close(fdIn) < 0) perror("Error closing input file descriptor");
+
+}
+
+void redirectOutput(char **args, int fdOut, int err, int outPos){
+    if(!strcmp(args[outPos], ">&"))
+        err = 1;
+
+    if(!strcmp(args[outPos], ">>")){
+        fdOut = open(args[outPos+1], O_WRONLY|O_CREAT|O_APPEND, 0644);
+        if(fdOut < 0){
+            perror("file descriptor stdout append error");
+            exit(1);
+        }
+    } else {
+        fdOut = open (args[outPos+1], O_WRONLY|O_CREAT|O_TRUNC, 0644);
+        if(fdOut < 0){
+            perror("file descriptor stdout replace error");
+            exit(1);
+        }
+    }
+
+    if (dup2(fdOut, STDOUT_FILENO) < 0) perror("error dup2ing stdout");
+    if(err)
+        if (dup2(fdOut, STDERR_FILENO) < 0) perror("error dup2ing stderr");
+
+    args[outPos] = NULL;
+}
+
+void closeRedirect(int fd){
+    if (close(fd) < 0) perror("Error closing file descriptor");
+}
+
+void evaluate(char **args){
 
     int inPos, outPos, err = 0;
-    int fdIn, fdOut;
+    int fdIn = 0, 
+        fdOut = 0;
 
     int pid, status;
 
@@ -205,85 +312,26 @@ void runCommands(char **args){
                 if(inPos > outPos){
                     printf("Please use simple I/O redirection\n");
                 } else {
-                    // we need to redirect error to if the redirection is '>&'
-                    if(!strcmp(args[outPos], ">&"))
-                        err = 1;
-
-                    printf("fdIn: (%s)\n", args[inPos+1]);
-                    fdIn = open (args[inPos+1], O_RDONLY);
-                    if(fdIn < 0){
-                        perror("file descriptor stdin error");
-                        exit(1);
-                    }
-
-                    if(!strcmp(args[outPos], ">>")){
-                        fdOut = open(args[outPos+1], O_WRONLY|O_CREAT|O_APPEND, 0644);
-                        if(fdOut < 0){
-                            perror("file descriptor stdout append error");
-                            exit(1);
-                        }
-                    } else {
-                        fdOut = open (args[outPos+1], O_WRONLY|O_CREAT|O_TRUNC, 0644);
-                        if(fdOut < 0){
-                            perror("file descriptor stdout replace error");
-                            exit(1);
-                        }
-                    }
-
-                    if (dup2(fdIn, STDIN_FILENO) < 0) perror("error dup2ing stdin");
-                    if (dup2(fdOut, STDOUT_FILENO) < 0) perror("error dup2ing stdout");
-                    if(err)
-                        if (dup2(fdOut, STDERR_FILENO) < 0) perror("error dup2ing stderr");
-
-                    args[inPos] = NULL;
+                    redirectInput(args, fdIn, err, inPos);
+                    redirectOutput(args, fdOut, err, outPos);
 
                     execute(args[0]);
 
-                    if (close(fdIn) < 0) perror("Error closing input file descriptor");
-                    if (close(fdOut) < 0) perror("Error closing output file descriptor");
+                    closeRedirect(fdIn);
+                    closeRedirect(fdOut);
                 }
             } else if(inPos > 0){  // Input Redirection
-                fdIn = open (args[inPos+1], O_RDONLY);
-                if(fdIn < 0){
-                    perror("file descriptor stdin error");
-                    exit(1);
-                }
-
-                if (dup2(fdIn, STDIN_FILENO) < 0) perror("error dup2ing stdin");
-
-                args[inPos] = NULL;
+                redirectInput(args, fdIn, err, inPos);
 
                 execute(args[0]);
 
-                if (close(fdIn) < 0) perror("Error closing input file descriptor");
-
+                closeRedirect(fdIn);
             } else if(outPos > 0){ // Output Redirection
-                if(!strcmp(args[outPos], ">&"))
-                    err = 1;
-
-                if(!strcmp(args[outPos], ">>")){
-                    fdOut = open(args[outPos+1], O_WRONLY|O_CREAT|O_APPEND, 0644);
-                    if(fdOut < 0){
-                        perror("file descriptor stdout append error");
-                        exit(1);
-                    }
-                } else {
-                    fdOut = open (args[outPos+1], O_WRONLY|O_CREAT|O_TRUNC, 0644);
-                    if(fdOut < 0){
-                        perror("file descriptor stdout replace error");
-                        exit(1);
-                    }
-                }
-
-                if (dup2(fdOut, STDOUT_FILENO) < 0) perror("error dup2ing stdout");
-                if(err)
-                    if (dup2(fdOut, STDERR_FILENO) < 0) perror("error dup2ing stderr");
-
-                args[outPos] = NULL;
+                redirectOutput(args, fdOut, err, outPos);
 
                 execute(args[0]);
 
-                if (close(fdOut) < 0) perror("Error closing output file descriptor");
+                closeRedirect(fdOut);
             }
         } else {
             execute(args[0]);

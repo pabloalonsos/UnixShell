@@ -1,0 +1,12 @@
+total 232
+drwxr-xr-x  11 pabloalonso  staff    374 Oct  9 09:39 .
+drwxr-xr-x  17 pabloalonso  staff    578 Oct  7 17:23 ..
+drwxr-xr-x  14 pabloalonso  staff    476 Oct  9 09:39 .git
+-rw-r--r--   1 pabloalonso  staff      7 Oct  6 01:07 .gitignore
+-rw-r--r--   1 pabloalonso  staff  32768 Oct  9 09:39 .shell.c.swp
+-rw-r--r--   1 pabloalonso  staff     72 Oct  6 00:37 Makefile
+-rw-r--r--   1 pabloalonso  staff      0 Oct  5 22:17 README.md
+-rw-r--r--   1 pabloalonso  staff  46155 Oct  6 00:59 hobbit.txt
+-rwxr-xr-x   1 pabloalonso  staff  13988 Oct  9 09:39 shell
+-rw-r--r--   1 pabloalonso  staff   9520 Oct  9 09:39 shell.c
+-rw-r--r--   1 pabloalonso  staff      0 Oct  9 09:39 t.txt
