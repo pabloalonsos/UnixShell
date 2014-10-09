@@ -25,7 +25,7 @@
 #define MAXCOMMSIZE 512
 
 void printPrompt(void);
-void *secureMalloc(size_t sizeToAlloc);
+void *secureMalloc(size_t sizeToAlloc, char *errMsg);
 int sizeOfArray(char **array);
 char **parseCommands(char *commandInput);
 int inputPosition(char **args);
@@ -43,7 +43,7 @@ int main(int argc, char *argv[]){
     while (1){
         // print prompt
         printPrompt();
-        cmdInput = secureMalloc(bufferSize * sizeof(char));
+        cmdInput = secureMalloc(bufferSize * sizeof(char), "Couldn't allocate memory for the input command");
 
         // get & parse command
         getline(&cmdInput, &bufferSize, stdin); // get input
@@ -71,10 +71,11 @@ void printPrompt(void){
     else printf("♞ :: ");
 }
 
-void *secureMalloc(size_t sizeToAlloc){
+void *secureMalloc(size_t sizeToAlloc, char *errMsg){
     void *mem = malloc(sizeToAlloc);
     // memory allocation error check
     if(!mem){
+        printf("%s\n", errMsg);
         perror("Failed to allocate memory.");
         exit(EXIT_FAILURE);
     }
@@ -89,8 +90,8 @@ int sizeOfArray(char **array){
 
 char **parseCommands(char *commandInput){
     char *token;
-    char *tmpStr = secureMalloc(100 * sizeof(char));
-    char **parsedArray = secureMalloc(MAXBUFFSIZE * sizeof(char*));
+    char *tmpStr = secureMalloc(100 * sizeof(char), "Couldn't allocate mem for temporary parsing string.");
+    char **parsedArray = secureMalloc(MAXBUFFSIZE * sizeof(char*), "Couldn't allocate memory for the command parsed array.");
     int argPos = 0;
 
     // replace trailing \n with empty char
@@ -106,15 +107,15 @@ char **parseCommands(char *commandInput){
         if(strcmp(token, "<")==0){
             parsedArray[argPos++] = tmpStr;
             parsedArray[argPos++] = "<";
-            tmpStr = secureMalloc(100 * sizeof(char*));
+            tmpStr = secureMalloc(100 * sizeof(char*), "Couldn't allocate mem for temporary parsing string.");
         } else if (strcmp(token, ">") == 0){
             parsedArray[argPos++] = tmpStr;
             parsedArray[argPos++] = ">";
-            tmpStr = secureMalloc(100 * sizeof(char*));
+            tmpStr = secureMalloc(100 * sizeof(char*), "Couldn't allocate mem for temporary parsing string.");
         } else if (strcmp(token, ">>") == 0){
             parsedArray[argPos++] = tmpStr;
             parsedArray[argPos++] = ">>";
-            tmpStr = secureMalloc(100 * sizeof(char*));
+            tmpStr = secureMalloc(100 * sizeof(char*), "Couldn't allocate mem for temporary parsing string.");
         } else {
             strcat(tmpStr," ");
             strcat(tmpStr,token);
@@ -124,7 +125,7 @@ char **parseCommands(char *commandInput){
 
     parsedArray[argPos++] = ++tmpStr;
 
-    char **normalizedCommands = secureMalloc(argPos * sizeof(char*));
+    char **normalizedCommands = secureMalloc(argPos * sizeof(char*), "Couldn't allocate mem for normalized commands array.");
     for(size_t i=0; i<argPos; i++){
         normalizedCommands[i] = parsedArray[i];
     }
@@ -163,7 +164,7 @@ int outputPosition(char **args){
 }
 
 char **getParams(char *params){
-    char **commandTokens = secureMalloc(30 * sizeof(char*));
+    char **commandTokens = secureMalloc(30 * sizeof(char*), "Couldn't allocate mem for temporary parsing string.");
     char *token = strtok(params, " \n");
     int arrayPos = 0;
 
@@ -179,7 +180,6 @@ char **getParams(char *params){
 
 void execute(char *args){
     char **argv = getParams(args);
-    printf("Running command: (%s)\n",argv[0]);
     if(execvp(argv[0],argv) < 0){ //execute command
         perror("Command not found.\n");
         exit(1);
