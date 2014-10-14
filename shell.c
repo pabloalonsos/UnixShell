@@ -292,7 +292,7 @@ void redirectOutput(char **args, int fdOut, int err, int outPos){
     if(!strcmp(args[outPos], ">&"))
         err = 1;
 
-    if(!strcmp(args[outPos], ">>")){
+    if(!strcmp(args[outPoters], ">>")){
         fdOut = open(args[outPos+1], O_WRONLY|O_CREAT|O_APPEND, 0644);
         if(fdOut < 0){
             perror("file descriptor stdout append error");
@@ -419,14 +419,15 @@ void pipeline(char **cmds, int pipePos){
             //printf("child at: (%d)\n", pid);
             // copy stdout fd into pipefd & close regular stdout
             //printf("pipefd[1]: (%d)\n", pipefd[1]);
-            //printf("STODUT_FILENO: (%d)\n",STDOUT_FILENO);
+            fprintf(stderr,"STODUT_FILENO 1\n");
             dup2(pipefd[1], STDOUT_FILENO);
-            //printf("dupped\n");
+            fprintf(stderr, "dupped\n");
             close(pipefd[0]);
-            //printf("evaluating kid\n");
+            fprintf(stderr,"evaluating kid\n");
             evaluateCmd(parseCommand(cmds[pipePos-1]));
-            cmds[pipePos] = NULL;
+            //cmds[pipePos] = NULL;
         } else { // parent
+            cmds[pipePos] = NULL;
             //printf("waiting parent\n");
             wait(&status);
             //printf("parent at: (%d)\n", pid);
@@ -440,7 +441,7 @@ void pipeline(char **cmds, int pipePos){
         //evaluate last command
         //printf("else?\n");
         //printf("size of array: (%d)\n",sizeOfArray(cmds));
-        //printf("trying to execute: (%s)\n", cmds[sizeOfArray(cmds)-1]);
+        printf("trying to execute: (%s)\n", cmds[sizeOfArray(cmds)-1]);
         evaluateCmd(parseCommand(cmds[sizeOfArray(cmds)-1]));
     }
 
