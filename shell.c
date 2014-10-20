@@ -318,10 +318,6 @@ void evaluateCmd(char **args){
     int fdIn = 0,
         fdOut = 0;
 
-    //int pid, status;
-
-    /*if((pid = fork()) == 0) {*/
-
         if(sizeOfArray(args)>1){
             inPos = inputPosition(args);
             outPos = outputPosition(args);
@@ -357,11 +353,6 @@ void evaluateCmd(char **args){
             //printf("executing: (%s)\n", args[0]);
             execute(args[0]);
         }
-
-    /*} else { // Parent*/
-        /*printf("waiting for ma' kid\n");*/
-        /*wait(&status);*/
-    /*}*/
 }
 
 char **setPipes(char *cmds){
@@ -471,7 +462,6 @@ void pipeline(char **cmds){
                 } else {
 
                     pipe(pipefds[i]);
-                    /*fprintf(stderr, "am i getting here?1\n");*/
 
                     if((pid=fork()) == 0){
 
