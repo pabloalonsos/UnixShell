@@ -47,7 +47,7 @@ int sizeOfArray(char **array);
  *  ">", ">>", ">&", "<"
  * The rest of the elements of the array are the commands to be run (e.g. ls -la, echo, etc)
  */
-char **parseCommands(char *commandInput);
+char **parseCommand(char *commandInput);
 
 /*
  * It returns the position in the array of commands the position of an input redirection character
@@ -90,15 +90,20 @@ void execute(char *args);
 /*
  * It sets the necessary redirection and executes the commands parsed previously
  */
-void evaluate(char **normalizedCommands);
+void evaluateCmd(char **cmd);
+
+int pipePosition(char **args);
+
+char **setPipes(char *cmds);
+
+void pipeline(char **cmds);
 
 int main(int argc, char *argv[]){
 
     size_t bufferSize = MAXBUFFSIZE;
-    char **normalizedCommands;
     char *cmdInput;
 
-    printf("\nSpeak, friend, and enter [your commands]. Enter 'exit' when you are done.\n\n");
+    char **sepCmds; //Will store each command separated by |
 
     while (1){
         // print prompt
@@ -108,20 +113,18 @@ int main(int argc, char *argv[]){
         // get & parse command
         getline(&cmdInput, &bufferSize, stdin); // get input
 
-        if(!strcmp(cmdInput, "exit\n")){
+        if(!strcmp(cmdInput, "exit\n") || !strcmp(cmdInput, "exit")){
+            printf("Now exiting...\n");
             free(cmdInput);
-            exit(0);
-        } else if (!strcmp(cmdInput, "friend\n")){
-            printf("Hello Gandalf! long time no see. Don't get into Moria, it's a trap!");
+            break;
         }
 
-        normalizedCommands = parseCommands(cmdInput);
+        sepCmds = setPipes(cmdInput);
 
-        // execute
-        evaluate(normalizedCommands);
+        pipeline(sepCmds);
 
         for(int i = 0; i < MAXBUFFSIZE; i++){
-            normalizedCommands[i] = NULL;
+            sepCmds[i] = NULL;
         }
 
         free(cmdInput);
@@ -154,14 +157,14 @@ int sizeOfArray(char **array){
     return size;
 }
 
-char **parseCommands(char *commandInput){
+char **parseCommand(char *commandInput){
     char *token;
     char *tmpStr = secureMalloc(MAXCOMMSIZE * sizeof(char), "Couldn't allocate mem for temporary parsing string.");
     char **parsedArray = secureMalloc(MAXBUFFSIZE * sizeof(char*), "Couldn't allocate memory for the command parsed array.");
     int argPos = 0;
 
     // replace trailing \n with empty char
-    commandInput[strlen(commandInput)-1] = '\0';
+    /*commandInput[strlen(commandInput)-1] = '\0';*/
 
     // Ignore leading spaces
     while(*commandInput && (*commandInput == ' '))
@@ -195,14 +198,6 @@ char **parseCommands(char *commandInput){
 
     parsedArray[argPos++] = ++tmpStr;
 
-    //char **normalizedCommands = secureMalloc(argPos * sizeof(char*), "Couldn't allocate mem for normalized commands array.");
-    //for(size_t i=0; i<argPos; i++){
-    //    printf("parsed: (%s)\n", parsedArray[i]);
-    //    normalizedCommands[i] = parsedArray[i];
-    //}
-
-    //free(parsedArray);
-    //return normalizedCommands;
     return parsedArray;
 }
 
@@ -216,7 +211,6 @@ int inputPosition(char **args){
                 return pos;
         }
         pos++;
-        //*args++;
         args++;
     }
     return 0;
@@ -231,7 +225,21 @@ int outputPosition(char **args){
                 return pos;
         }
         pos++;
-        //*args++;
+        args++;
+    }
+    return 0;
+}
+
+//returns first | position
+int pipePosition(char **args){
+    int pos = 0;
+    while(*args != NULL){
+        if(!strcmp(*args, "|")){
+            if ((*(args+1) != NULL) && (*(args-1) != NULL)){
+                return pos;
+            }
+        }
+        pos++;
         args++;
     }
     return 0;
@@ -272,8 +280,6 @@ void redirectInput(char **args, int fdIn, int err, int inPos){
 
     args[inPos] = NULL;
 
-    if (close(fdIn) < 0) perror("Error closing input file descriptor");
-
 }
 
 void redirectOutput(char **args, int fdOut, int err, int outPos){
@@ -305,15 +311,11 @@ void closeRedirect(int fd){
     if (close(fd) < 0) perror("Error closing file descriptor");
 }
 
-void evaluate(char **args){
+void evaluateCmd(char **args){
 
     int inPos, outPos, err = 0;
-    int fdIn = 0, 
+    int fdIn = 0,
         fdOut = 0;
-
-    int pid, status;
-
-    if((pid = fork()) == 0) {
 
         if(sizeOfArray(args)>1){
             inPos = inputPosition(args);
@@ -349,8 +351,140 @@ void evaluate(char **args){
         } else {
             execute(args[0]);
         }
+}
 
-    } else { // Parent
-        wait(&status);
+char **setPipes(char *cmds){
+
+    char *token;
+    char *tmpStr = secureMalloc(MAXCOMMSIZE * sizeof(char), "Couldn't allocate mem for temporary parsing string.");
+    char **parsedArray = secureMalloc(MAXBUFFSIZE * sizeof(char*), "Couldn't allocate memory for the parsed array.");
+    int argPos = 0;
+
+    // replace trailing \n with empty char
+    cmds[strlen(cmds)-1] = '\0';
+
+    // Ignore leading spaces
+    while(*cmds && (*cmds == ' '))
+        cmds++;
+
+    token = strtok(cmds, " \n");
+
+    while(token != NULL){
+        if(strcmp(token, "|")==0){
+            parsedArray[argPos++] = tmpStr;
+            parsedArray[argPos++] = "|";
+            tmpStr = secureMalloc(MAXCOMMSIZE * sizeof(char*), "Couldn't allocate mem for temporary parsing string.");
+        } else {
+            strcat(tmpStr," ");
+            strcat(tmpStr,token);
+        }
+        token = strtok(NULL," ");
     }
+
+    parsedArray[argPos++] = ++tmpStr;
+    parsedArray[argPos] = NULL;
+
+    return parsedArray;
+}
+
+int getCommandNum(char **cmds){
+    int count = 0;
+
+    for(size_t i=0; i<sizeOfArray(cmds); i++){
+        if(strcmp(cmds[i],"|") != 0){
+            count++;
+        }
+    }
+    return count;
+}
+
+void pipeline(char **cmds){
+
+    int pipePos,
+        commandNum = getCommandNum(cmds),
+        pipefds[commandNum][2],
+        isFirstCmd = 1,
+        pid, status,
+        sizeCmds = sizeOfArray(cmds);
+
+    pipePos = pipePosition(cmds);
+
+    if(pipePos){
+        if((pid=fork()) == 0){
+            for(int i=0; i<commandNum; i++){
+
+                pipePos = pipePosition(cmds);
+
+                if(isFirstCmd){
+
+                    pipe(pipefds[i]);
+                    if((pid = fork()) == 0){
+
+                        close(pipefds[i][0]); // close unnecesary end of pipe
+                        dup2(pipefds[i][1], STDOUT_FILENO);
+                        close(pipefds[i][1]);
+                        evaluateCmd(parseCommand(cmds[0]));
+
+                    } else {
+                        close(pipefds[i][0]);
+                        close(pipefds[i][1]);
+                        waitpid(pid, &status, 0);
+                    }
+                    isFirstCmd = 0;
+
+                } else if( i == (commandNum-1)){
+                    pipe(pipefds[i]);
+                    if((pid = fork()) == 0){
+
+                        close(pipefds[i][1]); // close unnecesary end of pipe
+                        dup2(pipefds[i][0], STDIN_FILENO);
+                        close(pipefds[i][0]); //parent closes output
+                        evaluateCmd(parseCommand(cmds[sizeCmds-1]));
+
+                    } else {
+                        close(pipefds[i][0]);
+                        close(pipefds[i][1]);
+
+                        waitpid(pid, &status, 0);
+                    }
+
+
+                } else {
+
+                    pipe(pipefds[i]);
+
+                    if((pid=fork()) == 0){
+
+                        dup2(pipefds[i][0], STDIN_FILENO);
+                        dup2(pipefds[i][1], STDOUT_FILENO);
+
+                        close(pipefds[i][0]);
+                        close(pipefds[i][1]);
+                        evaluateCmd(parseCommand(cmds[pipePos-1]));
+
+                    } else {
+                        close(pipefds[i][0]);
+                        close(pipefds[i][1]);
+
+                        waitpid(pid, &status, 0);
+
+                    }
+                }
+
+                cmds[pipePos] = NULL;
+            }
+
+        } else {
+            waitpid(pid, &status, 0);
+
+        }
+    } else {
+        if((pid=fork()) == 0){
+            evaluateCmd(parseCommand(cmds[0])); // evaluate last command
+        } else {
+            wait(&status);
+        }
+    }
+
+
 }
