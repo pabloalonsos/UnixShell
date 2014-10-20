@@ -8,7 +8,6 @@
  *        Version:  1.0
  *        Created:  10/01/2014
  *       Compiler:  gcc
- *       TODO:      UNCOMMENT FORK IN EVALUATECMD?????
  *
  *         Author:  Pablo Alonso
  *
@@ -350,7 +349,6 @@ void evaluateCmd(char **args){
                 closeRedirect(fdOut);
             }
         } else {
-            //printf("executing: (%s)\n", args[0]);
             execute(args[0]);
         }
 }
@@ -400,13 +398,6 @@ int getCommandNum(char **cmds){
     return count;
 }
 
-void closeAllPipefds(int pipefds[][2], int size){
-    for(int i=0; i<size; i++){
-        close(pipefds[i][0]);
-        close(pipefds[i][1]);
-    }
-}
-
 void pipeline(char **cmds){
 
     int pipePos,
@@ -432,7 +423,6 @@ void pipeline(char **cmds){
                         close(pipefds[i][0]); // close unnecesary end of pipe
                         dup2(pipefds[i][1], STDOUT_FILENO);
                         close(pipefds[i][1]);
-                        fprintf(stderr, "executing first command\n");
                         evaluateCmd(parseCommand(cmds[0]));
 
                     } else {
