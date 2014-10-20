@@ -106,8 +106,6 @@ int main(int argc, char *argv[]){
 
     char **sepCmds; //Will store each command separated by |
 
-    printf("\nSpeak, friend, and enter [your commands]. Enter 'exit' when you are done.\n\n");
-
     while (1){
         // print prompt
         printPrompt();
@@ -116,11 +114,10 @@ int main(int argc, char *argv[]){
         // get & parse command
         getline(&cmdInput, &bufferSize, stdin); // get input
 
-        if(!strcmp(cmdInput, "exit\n")){
+        if(!strcmp(cmdInput, "exit\n") || !strcmp(cmdInput, "exit")){
+            printf("Now exiting...\n");
             free(cmdInput);
-            exit(0);
-        } else if (!strcmp(cmdInput, "friend\n")){
-            printf("Hello Gandalf! long time no see. Don't get into Moria, it's a trap!\n");
+            break;
         }
 
         sepCmds = setPipes(cmdInput);
@@ -321,7 +318,7 @@ void evaluateCmd(char **args){
     int fdIn = 0,
         fdOut = 0;
 
-    int pid, status;
+    //int pid, status;
 
     /*if((pid = fork()) == 0) {*/
 
@@ -357,7 +354,7 @@ void evaluateCmd(char **args){
                 closeRedirect(fdOut);
             }
         } else {
-            printf("executing: (%s)\n", args[0]);
+            //printf("executing: (%s)\n", args[0]);
             execute(args[0]);
         }
 
@@ -434,7 +431,6 @@ void pipeline(char **cmds){
         if((pid=fork()) == 0){
             for(int i=0; i<commandNum; i++){
 
-                fprintf(stderr, "a\n");
                 pipePos = pipePosition(cmds);
 
                 if(isFirstCmd){
@@ -445,17 +441,13 @@ void pipeline(char **cmds){
                         close(pipefds[i][0]); // close unnecesary end of pipe
                         dup2(pipefds[i][1], STDOUT_FILENO);
                         close(pipefds[i][1]);
+                        fprintf(stderr, "executing first command\n");
                         evaluateCmd(parseCommand(cmds[0]));
-                        //close(pipefds[i][1]); //parent closes output
 
                     } else {
-                        /*for(int i=0; i<commandNum; i++){*/
-                            /*close(pipefds[i][0]);*/
-                            /*close(pipefds[i][1]);*/
-                        /*}*/
-
-                        //if(waitpid(pid,&status,0)<0) //parent waits for child to finish
-                        //    perror("wait foreground: wait pid error");
+                        close(pipefds[i][0]);
+                        close(pipefds[i][1]);
+                        waitpid(pid, &status, 0);
                     }
                     isFirstCmd = 0;
 
@@ -469,13 +461,10 @@ void pipeline(char **cmds){
                         evaluateCmd(parseCommand(cmds[sizeCmds-1]));
 
                     } else {
-                        /*for(int i=0; i<commandNum; i++){*/
-                            /*close(pipefds[i][0]);*/
-                            /*close(pipefds[i][1]);*/
-                        /*}*/
+                        close(pipefds[i][0]);
+                        close(pipefds[i][1]);
 
-                        //if(waitpid(pid,&status,0)<0) //parent waits for child to finish
-                        //    perror("wait foreground: wait pid error");
+                        waitpid(pid, &status, 0);
                     }
 
 
@@ -492,18 +481,13 @@ void pipeline(char **cmds){
                         close(pipefds[i][0]);
                         close(pipefds[i][1]);
                         evaluateCmd(parseCommand(cmds[pipePos-1]));
-                        //close(pipefds[i][0]); //parent closes output
-                        //close(pipefds[i][1]); //parent closes output
-
 
                     } else {
-                        /*for(int i=0; i<commandNum; i++){*/
-                            /*close(pipefds[i][0]);*/
-                            /*close(pipefds[i][1]);*/
-                        /*}*/
+                        close(pipefds[i][0]);
+                        close(pipefds[i][1]);
 
-                        //if(waitpid(pid,&status,0)<0) //parent waits for child to finish
-                        //    perror("wait foreground: wait pid error");
+                        waitpid(pid, &status, 0);
+
                     }
                 }
 
@@ -511,13 +495,7 @@ void pipeline(char **cmds){
             }
 
         } else {
-            fprintf(stderr, "stuck here?\n");
-            for(int i=0; i<commandNum; i++){
-                close(pipefds[i][0]);
-                close(pipefds[i][1]);
-            }
-            waitpid(-1, NULL, 0);
-            fprintf(stderr, "yeah I'm stuck\n");
+            waitpid(pid, &status, 0);
 
         }
     } else {
