@@ -444,18 +444,18 @@ void pipeline(char **cmds){
 
                         close(pipefds[i][0]); // close unnecesary end of pipe
                         dup2(pipefds[i][1], STDOUT_FILENO);
-
+                        close(pipefds[i][1]);
                         evaluateCmd(parseCommand(cmds[0]));
-                        close(pipefds[i][1]); //parent closes output
-                        
+                        //close(pipefds[i][1]); //parent closes output
+
                     } else {
                         /*for(int i=0; i<commandNum; i++){*/
                             /*close(pipefds[i][0]);*/
                             /*close(pipefds[i][1]);*/
                         /*}*/
 
-                        if(waitpid(pid,&status,0)<0) //parent waits for child to finish
-                            perror("wait foreground: wait pid error");
+                        //if(waitpid(pid,&status,0)<0) //parent waits for child to finish
+                        //    perror("wait foreground: wait pid error");
                     }
                     isFirstCmd = 0;
 
@@ -465,10 +465,8 @@ void pipeline(char **cmds){
 
                         close(pipefds[i][1]); // close unnecesary end of pipe
                         dup2(pipefds[i][0], STDIN_FILENO);
-
-                        evaluateCmd(parseCommand(cmds[sizeCmds-1]));
                         close(pipefds[i][0]); //parent closes output
-                        
+                        evaluateCmd(parseCommand(cmds[sizeCmds-1]));
 
                     } else {
                         /*for(int i=0; i<commandNum; i++){*/
@@ -476,8 +474,8 @@ void pipeline(char **cmds){
                             /*close(pipefds[i][1]);*/
                         /*}*/
 
-                        if(waitpid(pid,&status,0)<0) //parent waits for child to finish
-                            perror("wait foreground: wait pid error");
+                        //if(waitpid(pid,&status,0)<0) //parent waits for child to finish
+                        //    perror("wait foreground: wait pid error");
                     }
 
 
@@ -491,14 +489,12 @@ void pipeline(char **cmds){
                         dup2(pipefds[i][0], STDIN_FILENO);
                         dup2(pipefds[i][1], STDOUT_FILENO);
 
-                       
-                        //close(pipefds[i][0]);
-                        //close(pipefds[i][1]);
+                        close(pipefds[i][0]);
+                        close(pipefds[i][1]);
                         evaluateCmd(parseCommand(cmds[pipePos-1]));
-                         close(pipefds[i][0]); //parent closes output
-                        close(pipefds[i][1]); //parent closes output
+                        //close(pipefds[i][0]); //parent closes output
+                        //close(pipefds[i][1]); //parent closes output
 
-                        
 
                     } else {
                         /*for(int i=0; i<commandNum; i++){*/
@@ -506,8 +502,8 @@ void pipeline(char **cmds){
                             /*close(pipefds[i][1]);*/
                         /*}*/
 
-                        if(waitpid(pid,&status,0)<0) //parent waits for child to finish
-                            perror("wait foreground: wait pid error");
+                        //if(waitpid(pid,&status,0)<0) //parent waits for child to finish
+                        //    perror("wait foreground: wait pid error");
                     }
                 }
 
@@ -520,7 +516,8 @@ void pipeline(char **cmds){
                 close(pipefds[i][0]);
                 close(pipefds[i][1]);
             }
-            wait(&status);
+            waitpid(-1, NULL, 0);
+            fprintf(stderr, "yeah I'm stuck\n");
 
         }
     } else {
