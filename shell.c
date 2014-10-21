@@ -116,7 +116,7 @@ int main(int argc, char *argv[]){
         if(!strcmp(cmdInput, "exit\n") || !strcmp(cmdInput, "exit")){
             printf("Now exiting...\n");
             free(cmdInput);
-            break;
+            return 0;
         }
 
         sepCmds = setPipes(cmdInput);
@@ -162,9 +162,6 @@ char **parseCommand(char *commandInput){
     char *tmpStr = secureMalloc(MAXCOMMSIZE * sizeof(char), "Couldn't allocate mem for temporary parsing string.");
     char **parsedArray = secureMalloc(MAXBUFFSIZE * sizeof(char*), "Couldn't allocate memory for the command parsed array.");
     int argPos = 0;
-
-    // replace trailing \n with empty char
-    /*commandInput[strlen(commandInput)-1] = '\0';*/
 
     // Ignore leading spaces
     while(*commandInput && (*commandInput == ' '))
@@ -400,91 +397,73 @@ int getCommandNum(char **cmds){
 
 void pipeline(char **cmds){
 
-    int pipePos,
-        commandNum = getCommandNum(cmds),
-        pipefds[commandNum][2],
-        isFirstCmd = 1,
-        pid, status,
-        sizeCmds = sizeOfArray(cmds);
-
-    pipePos = pipePosition(cmds);
+    int commandNum = getCommandNum(cmds),
+        pid, status, mpid,
+        sizeCmds = sizeOfArray(cmds),
+        pipeNum = sizeCmds - commandNum,
+        pipePos = pipePosition(cmds),
+        pipefds[pipeNum*2];
 
     if(pipePos){
-        if((pid=fork()) == 0){
+        if((mpid=fork()) == 0){
+
+            for(int i=0; i<pipeNum; i++){ // create pipes
+                if(pipe(pipefds + i*2) < 0){
+                    perror("error creating pipes");
+                }
+            }
+
+            int pipeTrack = 0;
             for(int i=0; i<commandNum; i++){
 
                 pipePos = pipePosition(cmds);
 
-                if(isFirstCmd){
+                if((pid = fork()) == 0){
 
-                    pipe(pipefds[i]);
-                    if((pid = fork()) == 0){
-
-                        close(pipefds[i][0]); // close unnecesary end of pipe
-                        dup2(pipefds[i][1], STDOUT_FILENO);
-                        close(pipefds[i][1]);
-                        evaluateCmd(parseCommand(cmds[0]));
-
-                    } else {
-                        close(pipefds[i][0]);
-                        close(pipefds[i][1]);
-                        waitpid(pid, &status, 0);
+                    if(i != (commandNum - 1)){ // If it's not last command
+                        if(dup2(pipefds[pipeTrack+1], STDOUT_FILENO) < 0)
+                            perror("error dup2ing to STDOUT");
                     }
-                    isFirstCmd = 0;
 
-                } else if( i == (commandNum-1)){
-                    pipe(pipefds[i]);
-                    if((pid = fork()) == 0){
+                    if(pipeTrack != 0){  // If it's not first command
+                        if(dup2(pipefds[pipeTrack-2], STDIN_FILENO) < 0)
+                            perror("error dup2ing to STDIN");
+                    }
 
-                        close(pipefds[i][1]); // close unnecesary end of pipe
-                        dup2(pipefds[i][0], STDIN_FILENO);
-                        close(pipefds[i][0]); //parent closes output
+                    for (int i=0; i<2*pipeNum; i++){
+                        close(pipefds[i]);
+                    }
+
+                    if(!pipePos){
                         evaluateCmd(parseCommand(cmds[sizeCmds-1]));
-
-                    } else {
-                        close(pipefds[i][0]);
-                        close(pipefds[i][1]);
-
-                        waitpid(pid, &status, 0);
-                    }
-
-
-                } else {
-
-                    pipe(pipefds[i]);
-
-                    if((pid=fork()) == 0){
-
-                        dup2(pipefds[i][0], STDIN_FILENO);
-                        dup2(pipefds[i][1], STDOUT_FILENO);
-
-                        close(pipefds[i][0]);
-                        close(pipefds[i][1]);
+                    } else{
                         evaluateCmd(parseCommand(cmds[pipePos-1]));
-
-                    } else {
-                        close(pipefds[i][0]);
-                        close(pipefds[i][1]);
-
-                        waitpid(pid, &status, 0);
-
                     }
-                }
 
+                    perror("Error evaluating commands");
+                    exit(1);
+
+                }
                 cmds[pipePos] = NULL;
+                pipeTrack += 2;
             }
 
-        } else {
-            waitpid(pid, &status, 0);
+            for(int i = 0; i < 2 * pipeNum; i++){
+                close(pipefds[i]);
+            }
+            for(int i = 0; i < pipeNum + 1; i++)
+                wait(&status);
 
+
+        } else {
+            waitpid(mpid, &status, 0);
         }
+
     } else {
         if((pid=fork()) == 0){
-            evaluateCmd(parseCommand(cmds[0])); // evaluate last command
+            evaluateCmd(parseCommand(cmds[0])); // evaluate command
         } else {
-            wait(&status);
+            wait(&status);  
         }
     }
-
-
 }
