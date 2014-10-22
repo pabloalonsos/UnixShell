@@ -141,16 +141,14 @@ int main(int argc, char *argv[]){
             return 0;
         }
 
+        // Separate input string into commands and pipes
         sepCmds = setPipes(cmdInput);
 
+        // set up pipes, fork per command, redirect pipes and process the commands
         pipeline(sepCmds);
 
-        for(int i = 0; i < MAXBUFFSIZE; i++){
-            sepCmds[i] = NULL;
-        }
-
+        // free memory allocated for input
         free(cmdInput);
-
     }
 
     return 0;
@@ -158,8 +156,8 @@ int main(int argc, char *argv[]){
 
 void printPrompt(void){
     char* PS1 = getenv("PS1");
-    if (PS1) printf("%s ",PS1);
-    else printf("♞ :: ");
+    if (PS1) printf("%s ",PS1); // If env PS1 is defined use PS1 as prompt
+    else printf("♞ :: ");       // Else use default prompt
 }
 
 void *secureMalloc(size_t sizeToAlloc, char *errMsg){
@@ -185,29 +183,47 @@ char **parseCommand(char *commandInput){
     char **parsedArray = secureMalloc(MAXBUFFSIZE * sizeof(char*), "Couldn't allocate memory for the command parsed array.");
     int argPos = 0;
 
+    // Initialize tmpStr
+    strcpy(tmpStr,"");
+
     // Ignore leading spaces
     while(*commandInput && (*commandInput == ' '))
         commandInput++;
 
     token = strtok(commandInput, " \n");
 
+    /*
+     * We now process each token to see if it equals any of the redirection set of characters (">", ">>", "<", ">&")
+     * Whenever it encounters any of these characters, the loop will store the accumulated string of tokens in parsedArray
+     * increment argPos (the position tracker), adding the redirection character and incrementing argPos again.
+     * When it finishes processing all the tokens, we add NULL at the end of the array so that we can measure its lenght in
+     * the future.
+     */
     while(token != NULL){
         if(strcmp(token, "<")==0){
             parsedArray[argPos++] = tmpStr;
             parsedArray[argPos++] = "<";
             tmpStr = secureMalloc(MAXCOMMSIZE * sizeof(char), "Couldn't allocate mem for temporary parsing string.");
+            strcpy(tmpStr,"");
+
         } else if (strcmp(token, ">") == 0){
             parsedArray[argPos++] = tmpStr;
             parsedArray[argPos++] = ">";
             tmpStr = secureMalloc(MAXCOMMSIZE * sizeof(char), "Couldn't allocate mem for temporary parsing string.");
+            strcpy(tmpStr,"");
+
         } else if (strcmp(token, ">>") == 0){
             parsedArray[argPos++] = tmpStr;
             parsedArray[argPos++] = ">>";
             tmpStr = secureMalloc(MAXCOMMSIZE* sizeof(char), "Couldn't allocate mem for temporary parsing string.");
+            strcpy(tmpStr,"");
+
         } else if (strcmp(token, ">&") == 0){
             parsedArray[argPos++] = tmpStr;
             parsedArray[argPos++] = ">&";
             tmpStr = secureMalloc(MAXCOMMSIZE * sizeof(char), "Couldn't allocate mem for temporary parsing string.");
+            strcpy(tmpStr,"");
+
         } else {
             strcat(tmpStr," ");
             strcat(tmpStr,token);
@@ -216,11 +232,15 @@ char **parseCommand(char *commandInput){
     }
 
     parsedArray[argPos++] = ++tmpStr;
+    parsedArray[argPos] = NULL;
 
     return parsedArray;
 }
 
-// Returns position of stdin redirect token '<' or 0 otherwise
+/*
+ * Keep track of the position that we are currently in while looping and if it finds "<" and if the syntax is correct 
+ * (there are commands at both sides of the character return the position of the character. Else return 0.
+ */
 int inputPosition(char **args){
     int pos = 0;
     while(*args != NULL){
@@ -235,6 +255,10 @@ int inputPosition(char **args){
     return 0;
 }
 
+/*
+ * Keep track of the position that we are currently in while looping and if it finds ">", ">>" or ">&" and if the syntax is correct 
+ * (there are commands at both sides of the character return the position of the character. Else return 0.
+ */
 int outputPosition(char **args){
     int pos = 0;
     while(*args != NULL){
@@ -249,7 +273,7 @@ int outputPosition(char **args){
     return 0;
 }
 
-//returns first | position
+//returns first | position or else 0.
 int pipePosition(char **args){
     int pos = 0;
     while(*args != NULL){
@@ -279,7 +303,9 @@ char **getParams(char *params){
     return commandTokens;
 }
 
-
+/*
+ * process the options and execute the command
+ */
 void execute(char *args){
     char **argv = getParams(args);
     if(execvp(argv[0],argv) < 0){ //execute command
@@ -288,6 +314,10 @@ void execute(char *args){
     } 
 }
 
+/*
+ * Set up input redirection file descriptors to read only.
+ * Then set the position of the redirection string to null so that the program jumps to the next one when processed
+ */
 void redirectInput(char **args, int fdIn, int err, int inPos){
     fdIn = open (args[inPos+1], O_RDONLY);
     if(fdIn < 0){
@@ -301,6 +331,12 @@ void redirectInput(char **args, int fdIn, int err, int inPos){
 
 }
 
+/*
+ * Set up output redirection file descriptors to write and create. If the redirection type is ">>" set to append, and if
+ * it is ">" set to truncate.
+ * If the output redirection string is error redirection, dup2 the output to stderr.
+ * Then set the position of the redirection string to null so that the program jumps to the next one when processed
+ */
 void redirectOutput(char **args, int fdOut, int err, int outPos){
     if(!strcmp(args[outPos], ">&"))
         err = 1;
@@ -326,58 +362,67 @@ void redirectOutput(char **args, int fdOut, int err, int outPos){
     args[outPos] = NULL;
 }
 
+/*
+ * Close the file descriptor passed to the function
+ */
 void closeRedirect(int fd){
     if (close(fd) < 0) perror("Error closing file descriptor");
 }
 
+/*
+ * Evaluate the command, set input and output redirection, process options and execute
+ */
 void evaluateCmd(char **args){
 
     int inPos, outPos, err = 0;
     int fdIn = 0,
         fdOut = 0;
 
-        if(sizeOfArray(args)>1){
-            inPos = inputPosition(args);
-            outPos = outputPosition(args);
+    if(sizeOfArray(args)>1){
+        inPos = inputPosition(args);
+        outPos = outputPosition(args);
 
-            // I/O redirection
-            if(inPos && outPos){
-                // stdout must go before stdin
-                if(inPos > outPos){
-                    printf("Please use simple I/O redirection\n");
-                } else {
-                    redirectInput(args, fdIn, err, inPos);
-                    redirectOutput(args, fdOut, err, outPos);
-
-                    execute(args[0]);
-
-                    closeRedirect(fdIn);
-                    closeRedirect(fdOut);
-                }
-            } else if(inPos > 0){  // Input Redirection
+        // I/O redirection
+        if(inPos && outPos){ // If there is input and output redirection
+            // stdout must go before stdin
+            if(inPos > outPos){
+                printf("Please use simple I/O redirection\n");
+            } else {
                 redirectInput(args, fdIn, err, inPos);
-
-                execute(args[0]);
-
-                closeRedirect(fdIn);
-            } else if(outPos > 0){ // Output Redirection
                 redirectOutput(args, fdOut, err, outPos);
 
                 execute(args[0]);
 
+                closeRedirect(fdIn);
                 closeRedirect(fdOut);
             }
-        } else {
+        } else if(inPos > 0){  // Input Redirection
+            redirectInput(args, fdIn, err, inPos);
+
             execute(args[0]);
+
+            closeRedirect(fdIn);
+        } else if(outPos > 0){ // Output Redirection
+            redirectOutput(args, fdOut, err, outPos);
+
+            execute(args[0]);
+
+            closeRedirect(fdOut);
         }
+    } else {
+        execute(args[0]);
+    }
 }
 
 char **setPipes(char *cmds){
 
     char *token;
-    char *tmpStr = secureMalloc(MAXCOMMSIZE * sizeof(char), "Couldn't allocate mem for temporary parsing string.");
-    char **parsedArray = secureMalloc(MAXBUFFSIZE * sizeof(char*), "Couldn't allocate memory for the parsed array.");
+    char *tmpStr = (char*)secureMalloc(MAXCOMMSIZE * sizeof(char), "Couldn't allocate mem for temporary parsing string.");
+    char **parsedArray = (char**)secureMalloc(MAXBUFFSIZE * sizeof(char*), "Couldn't allocate memory for the parsed array.");
     int argPos = 0;
+
+    // Initialize tmpStr
+    strcpy(tmpStr,"");
 
     // replace trailing \n with empty char
     cmds[strlen(cmds)-1] = '\0';
@@ -388,11 +433,19 @@ char **setPipes(char *cmds){
 
     token = strtok(cmds, " \n");
 
+     /*
+     * We now process each token to see if it equals the pipe character "|""
+     * Whenever it encounters this character, the loop will store the accumulated string of tokens in parsedArray
+     * increment argPos (the position tracker), adding the pipe character and incrementing argPos again.
+     * When it finishes processing all the tokens, we add NULL at the end of the array so that we can measure its lenght in
+     * the future.
+     */
     while(token != NULL){
         if(strcmp(token, "|")==0){
             parsedArray[argPos++] = tmpStr;
             parsedArray[argPos++] = "|";
             tmpStr = secureMalloc(MAXCOMMSIZE * sizeof(char*), "Couldn't allocate mem for temporary parsing string.");
+            strcpy(tmpStr,"");
         } else {
             strcat(tmpStr," ");
             strcat(tmpStr,token);
@@ -406,6 +459,9 @@ char **setPipes(char *cmds){
     return parsedArray;
 }
 
+/*
+ * Loop through cmds and increment counter if the element of the array is not the pipe character
+ */
 int getCommandNum(char **cmds){
     int count = 0;
 
@@ -417,6 +473,9 @@ int getCommandNum(char **cmds){
     return count;
 }
 
+/*
+ * Set up pipes
+ */
 void pipeline(char **cmds){
 
     int commandNum = getCommandNum(cmds),
@@ -426,9 +485,15 @@ void pipeline(char **cmds){
         pipePos = pipePosition(cmds),
         pipefds[pipeNum*2];
 
+    /*
+     * If there is a pipe character in cmds, process pipes, else fork and execute the only command
+     */
     if(pipePos){
+        // I called this fork the master fork. From its child, all the pipes are set and all the processes are forked.
         if((mpid=fork()) == 0){
 
+            // Initialize one pipe per every pipe element("|") in the array
+            // pipefds stores input and output file descriptors per "|"
             for(int i=0; i<pipeNum; i++){ // create pipes
                 if(pipe(pipefds + i*2) < 0){
                     perror("error creating pipes");
@@ -436,32 +501,33 @@ void pipeline(char **cmds){
             }
 
             int pipeTrack = 0;
+            // Set up pipes for every command
             for(int i=0; i<commandNum; i++){
 
                 pipePos = pipePosition(cmds);
 
-                if((pid = fork()) == 0){
+                if((pid = fork()) == 0){ // each command will has its own child process and will share the parent with the rest
 
                     if(i != (commandNum - 1)){ // If it's not last command
-                        if(dup2(pipefds[pipeTrack+1], STDOUT_FILENO) < 0)
+                        if(dup2(pipefds[pipeTrack+1], STDOUT_FILENO) < 0) // redirect file descriptor to stdout
                             perror("error dup2ing to STDOUT");
                     }
 
                     if(pipeTrack != 0){  // If it's not first command
-                        if(dup2(pipefds[pipeTrack-2], STDIN_FILENO) < 0)
+                        if(dup2(pipefds[pipeTrack-2], STDIN_FILENO) < 0) // redirect file descriptor to stdin
                             perror("error dup2ing to STDIN");
                     }
 
-                    for (int i=0; i<2*pipeNum; i++){
+                    for (int i=0; i<2*pipeNum; i++){ // close all pipes
                         close(pipefds[i]);
                     }
 
-                    if(!pipePos){
+                    if(!pipePos){ // if it's the last command evaluate last command in cmds
                         evaluateCmd(parseCommand(cmds[sizeCmds-1]));
-                    } else{
+                    } else{ // else evaluate the command located before the pipe string in cmds
                         evaluateCmd(parseCommand(cmds[pipePos-1]));
                     }
-
+                    // we should never get there.
                     perror("Error evaluating commands");
                     exit(1);
 
@@ -469,15 +535,17 @@ void pipeline(char **cmds){
                 cmds[pipePos] = NULL;
                 pipeTrack += 2;
             }
-
+            // close all pipes
             for(int i = 0; i < 2 * pipeNum; i++){
                 close(pipefds[i]);
             }
+            // wait on all children
             for(int i = 0; i < pipeNum + 1; i++)
                 wait(&status);
 
 
         } else {
+            // once my child is done, exit.
             waitpid(mpid, &status, 0);
             exit(0);
         }
